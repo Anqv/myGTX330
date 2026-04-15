@@ -1,0 +1,14 @@
+# Arduino build artifacts
+build/
+*.elf
+*.hex
+*.bin
+*.map
+
+# Arduino IDE
+*.orig
+.DS_Store
+Thumbs.db
+
+# Claude Code local settings
+.claude/settings.local.json
