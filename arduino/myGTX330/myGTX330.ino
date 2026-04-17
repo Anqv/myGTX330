@@ -944,29 +944,19 @@ static void drawCentreZone() {
 // =============================================================================
 
 static void drawRightZoneHeader(const char* label) {
-    u8g2.setFont(u8g2_font_5x7_tr);
-    u8g2.drawStr(RZONE_X, 10, label);
-    u8g2.drawHLine(RZONE_X, 12, RZONE_W);
+    u8g2.setFont(u8g2_font_6x10_tr);
+    u8g2.drawStr(RZONE_X, 11, label);
+    u8g2.drawHLine(RZONE_X, 13, RZONE_W);
 }
 
-// Draw HH:MM in bold medium font + :SS in small font, vertically centred
+// Draw HH:MM:SS all in the same bold font, centred in the right zone
 static void drawTimeInRightZone(uint8_t h, uint8_t m, uint8_t s, uint8_t yBase = 40) {
-    char hm[6], ss[4];
-    snprintf(hm, sizeof(hm), "%02u:%02u", h, m);
-    snprintf(ss, sizeof(ss), ":%02u", s);
-
+    char buf[9];
+    snprintf(buf, sizeof(buf), "%02u:%02u:%02u", h, m, s);
     u8g2.setFont(u8g2_font_helvB14_tr);
-    int16_t hmW = u8g2.getStrWidth(hm);
-    u8g2.setFont(u8g2_font_5x7_tr);
-    int16_t ssW = u8g2.getStrWidth(ss);
-
-    int16_t totalW = hmW + ssW;
-    int16_t startX = RZONE_X + max((int16_t)0, (int16_t)(RZONE_W - totalW) / 2);
-
-    u8g2.setFont(u8g2_font_helvB14_tr);
-    u8g2.drawStr(startX, yBase, hm);
-    u8g2.setFont(u8g2_font_5x7_tr);
-    u8g2.drawStr(startX + hmW, yBase, ss);
+    int16_t w = u8g2.getStrWidth(buf);
+    int16_t startX = RZONE_X + max((int16_t)0, (int16_t)(RZONE_W - w) / 2);
+    u8g2.drawStr(startX, yBase, buf);
 }
 
 // =============================================================================
@@ -987,14 +977,14 @@ static void drawRightUTC() {
 // =============================================================================
 
 static void drawRightFLT() {
-    char label[12];
     if (fltModeToast && (millis()-fltModeToastMs < FLT_TOAST_MS)) {
-        snprintf(label, sizeof(label), "FLT %s OK", fltMode == FLT_AUTO ? "AUTO" : "MAN");
+        char toast[12];
+        snprintf(toast, sizeof(toast), "FLT %s OK", fltMode == FLT_AUTO ? "AUTO" : "MAN");
+        drawRightZoneHeader(toast);
     } else {
         fltModeToast = false;
-        snprintf(label, sizeof(label), "FLT %s", fltMode == FLT_AUTO ? "AUTO" : "MAN");
+        drawRightZoneHeader("FLIGHT TIME");
     }
-    drawRightZoneHeader(label);
 
     uint32_t sec = fltSec();
     uint8_t h = (uint8_t)min((uint32_t)99, sec / 3600);
