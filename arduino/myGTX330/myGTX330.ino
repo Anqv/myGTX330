@@ -953,7 +953,7 @@ static void drawRightZoneHeader(const char* label) {
 static void drawTimeInRightZone(uint8_t h, uint8_t m, uint8_t s, uint8_t yBase = 40) {
     char buf[9];
     snprintf(buf, sizeof(buf), "%02u:%02u:%02u", h, m, s);
-    u8g2.setFont(u8g2_font_helvB14_tr);
+    u8g2.setFont(u8g2_font_helvB12_tr);
     int16_t w = u8g2.getStrWidth(buf);
     int16_t startX = RZONE_X + max((int16_t)0, (int16_t)(RZONE_W - w) / 2);
     u8g2.drawStr(startX, yBase, buf);
