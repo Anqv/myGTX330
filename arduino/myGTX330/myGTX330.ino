@@ -40,6 +40,8 @@
  *   CH 10  ARD→AM  New squawk code set by pilot
  *   CH 11  ARD→AM  New mode set by pilot
  *   CH 12  ARD→AM  IDENT button pressed (one-shot)
+ *   CH 20  ARD→AM  Ping — detect when AM is ready (sent every 2 s until reply)
+ *   CH 21  AM→ARD  AM ready — Arduino pushes squawk + mode to X-Plane
  *   CH 99  ARD→AM  Debug string (when DEBUG_TO_AM = true)
  *
  * ── Library requirements ─────────────────────────────────────────────────────
@@ -61,7 +63,7 @@
 //  Set both to false to disable all debug output (saves RAM and CPU).
 // =============================================================================
 
-static const bool DEBUG_TO_AM      = true;
+static const bool DEBUG_TO_AM      = false;
 static const bool DEBUG_TO_SERIAL1 = true;
 
 // =============================================================================
@@ -82,10 +84,12 @@ U8G2_SSD1322_NHD_256X64_F_4W_SW_SPI u8g2(
 #define CH_IDENT_XP      5
 #define CH_GROUND_SPEED  6
 #define CH_SIM_TIME      7
-#define CH_SQUAWK_SET   10
-#define CH_MODE_SET     11
-#define CH_IDENT_BTN    12
-#define CH_DEBUG        99  // ARD→AM debug string (SendMessage with String)
+#define CH_SQUAWK_SET     10
+#define CH_MODE_SET       11
+#define CH_IDENT_BTN      12
+#define CH_REQUEST_UPDATE 20  // ARD→AM: ping — are you there?
+#define CH_AM_READY       21  // AM→ARD: yes, ready — Arduino now pushes state to X-Plane
+#define CH_DEBUG          99  // ARD→AM debug string (SendMessage with String)
 
 // =============================================================================
 //  ENUMERATIONS
@@ -223,6 +227,21 @@ static uint32_t cdtPrevSetSec = 0;     // saved for CLR-cancel
 SiMessagePort* messagePort;
 
 // =============================================================================
+//  STARTUP SYNC
+//  CH_REQUEST_UPDATE (ping) is sent every SYNC_RETRY_MS until AM replies with
+//  CH_AM_READY. On receipt Arduino pushes squawk + mode to X-Plane and sets
+//  syncDone, showing a brief RDY badge on the display.
+// =============================================================================
+
+#define SYNC_RETRY_MS 4000u
+
+static bool     syncDone      = false;
+static uint32_t lastSyncReqMs = 0;
+static bool     syncToast     = false;
+static uint32_t syncToastMs   = 0;
+#define SYNC_TOAST_MS 1500u
+
+// =============================================================================
 //  DEBUG HELPERS
 //  dbg(msg)         — send a literal string
 //  dbgf(fmt, ...)   — send a printf-formatted string (max 79 chars)
@@ -314,12 +333,10 @@ static void checkAutoFlt() {
 //  MESSAGE CALLBACK  (Air Manager → Arduino, little-endian int32)
 // =============================================================================
 
-static void onMessage(uint16_t id, uint8_t* d, uint8_t len) {
-    int32_t v = 0;
-    if (len >= 4)
-        v = (int32_t)d[0] | ((int32_t)d[1]<<8) | ((int32_t)d[2]<<16) | ((int32_t)d[3]<<24);
-
-    switch (id) {
+static void onMessage(uint16_t message_id, struct SiMessagePortPayload* payload) {
+    if (payload == NULL || payload->type != SI_MESSAGE_PORT_DATA_TYPE_INTEGER) return;
+    int32_t v = payload->data_int[0];
+    switch (message_id) {
         case CH_SQUAWK:
             if (!editMode) {
                 squawkCode   = (uint16_t)v;
@@ -367,10 +384,24 @@ static void onMessage(uint16_t id, uint8_t* d, uint8_t len) {
             uint8_t s = (uint8_t)(v % 60);
             // Log only on new minute to avoid spam
             if (s == 0) dbgf("AM>UTC:%02u:%02u:%02u", h, m, s);
+
             break;
         }
+        case CH_AM_READY:
+            Serial1.println("CH_AM_READY\n");
+            if (!syncDone) {
+                syncDone    = true;
+                syncToast   = true;
+                syncToastMs = millis();
+                // Push Arduino's current state to X-Plane via Air Manager
+                messagePort->SendMessage(CH_SQUAWK_SET, (int32_t)squawkCode);
+                messagePort->SendMessage(CH_MODE_SET,   (int32_t)txpMode);
+                dbgf("SYNC: AM ready — pushed SQWK:%04u MODE:%s to XP",
+                     squawkCode, MODE_NAMES[(uint8_t)txpMode]);
+            }
+            break;
         default:
-            dbgf("AM>UNKNOWN ch=%u val=%ld", id, v);
+            dbgf("AM>UNKNOWN ch=%u val=%ld", message_id, v);
             break;
     }
 }
@@ -859,6 +890,19 @@ static void drawCentreZone() {
         } else {
             editInvalid = false;
         }
+    } else if (syncToast) {
+        if ((now - syncToastMs) < SYNC_TOAST_MS) {
+            u8g2.setFont(u8g2_font_5x7_tr);
+            u8g2.drawRFrame(CZONE_X, 1, 20, 11, 2);
+            u8g2.drawStr(CZONE_X + 3, 10, "RDY");
+        } else {
+            syncToast = false;
+        }
+    } else if (!syncDone) {
+        if ((now / 500) & 1) {
+            u8g2.setFont(u8g2_font_5x7_tr);
+            u8g2.drawStr(CZONE_X + 2, 10, "SYNC");
+        }
     }
 
     // ── Four squawk digits, auto-centred in CZONE_W ──────────────────────────
@@ -1157,6 +1201,7 @@ void setup() {
         SI_MESSAGE_PORT_DEVICE_ARDUINO_MEGA_2560,
         SI_MESSAGE_PORT_CHANNEL_A,
         onMessage);
+    lastSyncReqMs = millis();  // trigger first request on first loop()
 
     initButtons();
 
@@ -1171,6 +1216,17 @@ void setup() {
 
 void loop() {
     messagePort->Tick();
+
+    // Startup sync: ping AM every SYNC_RETRY_MS until it replies with CH_AM_READY
+    if (!syncDone) {
+        uint32_t now = millis();
+        if (now - lastSyncReqMs >= SYNC_RETRY_MS) {
+            messagePort->SendMessage(CH_REQUEST_UPDATE, (int32_t)1);
+            lastSyncReqMs = now;
+            dbg("SYNC: pinging AM...");
+        }
+    }
+
     pollDebugSerial();
     checkIdentExpiry();
     checkCdtExpiry();

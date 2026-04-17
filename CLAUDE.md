@@ -51,6 +51,8 @@ All Arduino↔Air Manager data flows through SiMessagePort integer channels. Cha
 | 10 | ARD→AM    | New squawk code set by pilot |
 | 11 | ARD→AM    | New mode set by pilot |
 | 12 | ARD→AM    | IDENT button pressed (one-shot, value=1) |
+| 20 | ARD→AM    | Ping — sent every 2 s until AM replies |
+| 21 | AM→ARD    | AM ready — Arduino pushes squawk + mode to X-Plane |
 | 99 | ARD→AM    | Debug string (when DEBUG_TO_AM = true) |
 
 ### Mode Translation
@@ -68,29 +70,57 @@ X-Plane and GTX330 use different mode numbering — translation happens in both 
 
 GTX330 GND (2) has no X-Plane equivalent — Lua writes SBY (1) to X-Plane when pilot selects GND.
 
+### SiMessagePort API
+
+The correct message callback signature (Sim Innovations library):
+
+```cpp
+static void onMessage(uint16_t message_id, struct SiMessagePortPayload* payload) {
+    if (payload == NULL || payload->type != SI_MESSAGE_PORT_DATA_TYPE_INTEGER) return;
+    int32_t v = payload->data_int[0];
+    // ...
+}
+```
+
+Key points: payload can be NULL; integer data is at `payload->data_int[0]` (array), not `payload->integer_value`.
+
 ### Arduino Sketch Structure
 
 Key sections in order:
-1. **Debug settings** (`DEBUG_TO_AM`, `DEBUG_TO_SERIAL1`) — top of file, toggle debug output
+1. **Debug settings** (`DEBUG_TO_AM false`, `DEBUG_TO_SERIAL1 true`) — top of file
 2. **Channel constants** (`CH_SQUAWK` … `CH_DEBUG`) — must match Lua
 3. **Enumerations** — `TxpMode`, `View`, `FltMode`
-4. **Button pin defines** — `BTN_0`…`BTN_9`, `BTN_IDENT`, `BTN_VFR`, `BTN_FUNC`, `BTN_CRSR`, `BTN_START_STOP`, `BTN_CLR`, `BTN_MODE_OFF/SBY/ON/ALT`
+4. **Button pin defines** and `Button` struct / `btns[]` array
 5. **State variables** — squawk, mode, alt, timers, view
-6. **`dbg()` / `dbgf()`** — debug helpers routing to Serial1 and/or CH_DEBUG
-7. **`onMessage()`** — Air Manager → Arduino message callback
-8. **Action dispatchers** — `commitSquawk()`, `dispatchNumKey()`, `dispatchCRSR()`, `dispatchStartStop()`, `dispatchCLR()`
-9. **`handleButtons()`** — reads physical button state, calls dispatchers
-10. **`emulateBtnAction()`** — Serial1 debug input handler, calls same dispatchers
-11. **Draw functions** — `drawLeftZone()`, `drawCentreZone()`, `drawRightUTC/FLT/CTU/CDT()`
-12. **`setup()` / `loop()`**
+6. **Startup sync state** — `syncDone`, `syncToast`, `lastSyncReqMs`
+7. **`dbg()` / `dbgf()`** — debug helpers routing to Serial1 and/or CH_DEBUG
+8. **`onMessage()`** — Air Manager → Arduino callback; handles `CH_AM_READY` by pushing squawk + mode to X-Plane and setting `syncDone`
+9. **Action dispatchers** — `commitSquawk()`, `dispatchNumKey()`, `dispatchCRSR()`, `dispatchStartStop()`, `dispatchCLR()`
+10. **`handleButtons()`** — reads physical button state, calls dispatchers
+11. **`emulateBtnAction()`** — Serial1 debug input handler, calls same dispatchers
+12. **Draw functions** — `drawLeftZone()`, `drawCentreZone()`, `drawRightUTC/FLT/CTU/CDT()`
+13. **`setup()` / `loop()`**
+
+### Startup Sync
+
+Arduino sends `CH_REQUEST_UPDATE` (ch 20, ping) every 2 s while `!syncDone`. Air Manager responds with `CH_AM_READY` (ch 21) — both immediately on instrument load and in reply to every ping, so either boot order works.
+
+When Arduino receives `CH_AM_READY` it pushes its current `squawkCode` and `txpMode` to X-Plane via `CH_SQUAWK_SET` / `CH_MODE_SET`, sets `syncDone`, and shows a brief `RDY` badge. Altitude, ground speed and UTC arrive naturally from X-Plane subscription callbacks as values change.
 
 ### Display Layout (256×64)
 
 Three fixed zones separated by vertical lines at x=60 and x=187:
 
 - **Left zone (x 1–57):** Mode label, IDENT flash with countdown, reply disc
-- **Centre zone (x 62–185):** Squawk code always visible (4 large digits), special badges (VFR/EMER/RDOF/HJCK), edit cursor
-- **Right zone (x 189–255):** Cycled by FUNC button — UTC / FLT / CTU / CDT
+- **Centre zone (x 62–185):** Squawk digits (always), badge top-left, view name top-right, edit cursor
+- **Right zone (x 189–255):** Cycled by FUNC — UTC / FLT / CTU / CDT
+
+**Centre zone badge priority** (mutually exclusive, top-left corner):
+1. EMER / RDOF / HJCK — flashing inverse, based on squawk code 7700 / 7600 / 7500
+2. VFR — rounded box, squawk 7000
+3. INV — invalid digit entry (1 s)
+4. RDY — sync complete toast (1.5 s)
+5. SYNC — blinking at 1 Hz while waiting for startup sync
 
 ### Button Wiring
 
@@ -115,7 +145,6 @@ Connect a USB-TTL adapter to pins 18 (TX) and 19 (RX) at 115200 baud to:
 - Read the status line printed once per second
 - Send button emulation commands: `BTN:<name>`
 
-Available emulation commands:
 ```
 BTN:0 … BTN:9           number pad
 BTN:IDENT  BTN:VFR
@@ -129,4 +158,6 @@ BTN:MODE_GND  BTN:MODE_TST   (emulation only — no physical button)
 - Uses AM 5.2 API: `hw_message_port_add()`, `hw_message_port_send()`, `xpl_dataref_subscribe()`, `xpl_dataref_write()`, `xpl_command(cmd, "ONCE")`
 - `hw_message_port_send` requires **4 arguments**: `hw_message_port_send(port_id, channel, "INT", value)`
 - Hardware port name `"Arduino Mega 2560"` must match the name assigned in Air Manager's Hardware settings panel
+- `last` table suppresses redundant sends (initialized to -1 so first subscription fire always sends)
+- On load, sends `CH_AM_READY` immediately; also replies with `CH_AM_READY` to every `CH_REQUEST_UPDATE` ping from Arduino
 - VFR squawk code is **7000** (EU/ICAO). Change `#define VFR_CODE 7000u` in the sketch for other regions (e.g. 1200 for US)

@@ -22,6 +22,8 @@
 --  CH 10  ARD→AM  New squawk code from pilot
 --  CH 11  ARD→AM  New transponder mode from pilot
 --  CH 12  ARD→AM  IDENT button pressed (one-shot)
+--  CH 20  ARD→AM  Ping — detect when AM is ready
+--  CH 21  AM→ARD  AM ready — Arduino will push squawk + mode to X-Plane
 --
 --  Mode translation
 --  ----------------
@@ -55,10 +57,12 @@ local CH_REPLY_LIGHT  =  4
 local CH_IDENT_XP     =  5
 local CH_GROUND_SPEED =  6
 local CH_SIM_TIME     =  7
-local CH_SQUAWK_SET   = 10
-local CH_MODE_SET     = 11
-local CH_IDENT_BTN    = 12
-local CH_DEBUG        = 99  -- ARD→AM debug string (payload is a string)
+local CH_SQUAWK_SET      = 10
+local CH_MODE_SET        = 11
+local CH_IDENT_BTN       = 12
+local CH_REQUEST_UPDATE  = 20  -- ARD→AM: ping
+local CH_AM_READY        = 21  -- AM→ARD: ready, Arduino may push state to X-Plane
+local CH_DEBUG           = 99  -- ARD→AM debug string (payload is a string)
 
 -- ---------------------------------------------------------------------------
 --  X-Plane dataref paths
@@ -75,6 +79,11 @@ local DR_ZLS    = "sim/cockpit2/clock_timer/zulu_time_seconds"
 local CMD_IDENT = "sim/transponder/transponder_ident"
 
 -- ---------------------------------------------------------------------------
+--  Hardware port handle (set by hw_message_port_add below)
+-- ---------------------------------------------------------------------------
+local port_id
+
+-- ---------------------------------------------------------------------------
 --  State cache — suppress redundant sends when value is unchanged
 -- ---------------------------------------------------------------------------
 local last = {
@@ -86,16 +95,12 @@ local last = {
     tod_sec = -1,
 }
 
+
 local zulu_h, zulu_m, zulu_s = 0, 0, 0
 
 -- Mode name table for readable debug output
 local GTX_MODE_NAMES = { [0]="OFF", [1]="SBY", [2]="GND", [3]="ON", [4]="ALT", [5]="TST" }
 local XP_MODE_NAMES  = { [0]="Off", [1]="SBY", [2]="On(A)", [3]="Alt(C)", [4]="Test" }
-
--- ---------------------------------------------------------------------------
---  Hardware port handle (set by hw_message_port_add below)
--- ---------------------------------------------------------------------------
-local port_id
 
 -- ---------------------------------------------------------------------------
 --  Arduino → Air Manager: handle pilot-initiated changes
@@ -119,9 +124,14 @@ local function on_arduino_message(message_id, payload)
         end
 
     elseif message_id == CH_MODE_SET then
-        -- GTX330 GND (2) → X-Plane SBY (1); no GND equivalent in X-Plane
+        -- GTX330 → X-Plane mode translation
+        -- GTX330: 0=OFF 1=SBY 2=GND 3=ON 4=ALT 5=TST
+        -- X-Plane: 0=Off 1=SBY 2=On(A) 3=Alt(C) 4=Test
         local xp_mode = payload
-        if payload == 2 then xp_mode = 1 end      -- GND → SBY
+        if payload == 2 then xp_mode = 1 end      -- GND → SBY (no XP equivalent)
+        if payload == 3 then xp_mode = 2 end      -- ON  → On(A)
+        if payload == 4 then xp_mode = 3 end      -- ALT → Alt(C)
+        if payload == 5 then xp_mode = 4 end      -- TST → Test
         local gtx_name = GTX_MODE_NAMES[payload]  or ("?(" .. tostring(payload) .. ")")
         local xp_name  = XP_MODE_NAMES[xp_mode]  or ("?(" .. tostring(xp_mode)  .. ")")
         if xp_mode >= 0 and xp_mode <= 4 then
@@ -135,6 +145,11 @@ local function on_arduino_message(message_id, payload)
         print("[GTX330] IDENT button → XP command")
         xpl_command(CMD_IDENT, "ONCE")             -- single-shot command (AM5)
 
+    elseif message_id == CH_REQUEST_UPDATE then
+        print("[GTX330] Arduino ping received — sending CH_AM_READY")
+	
+        hw_message_port_send(port_id, CH_AM_READY, "INT", 1)
+
     elseif message_id == CH_DEBUG then
         print("[GTX330] ARD: " .. tostring(payload))
 
@@ -146,6 +161,11 @@ end
 -- Register hardware message port — returns port_id used for sending
 port_id = hw_message_port_add(HW_PORT_NAME, on_arduino_message)
 print("[GTX330] hw_message_port_add returned port_id=" .. tostring(port_id))
+-- If Arduino is already running, notify it immediately
+if port_id then
+    hw_message_port_send(port_id, CH_AM_READY, "INT", 1)
+    print("[GTX330] Sent CH_AM_READY on load")
+end
 
 -- ---------------------------------------------------------------------------
 --  Squawk code: X-Plane → Arduino
