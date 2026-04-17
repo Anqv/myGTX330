@@ -87,7 +87,7 @@ Key points: payload can be NULL; integer data is at `payload->data_int[0]` (arra
 ### Arduino Sketch Structure
 
 Key sections in order:
-1. **Debug settings** (`DEBUG_TO_AM false`, `DEBUG_TO_SERIAL1 true`) — top of file
+1. **Version / Debug settings** (`FW_VERSION`, `DEBUG_TO_AM false`, `DEBUG_TO_SERIAL1 true`) — top of file
 2. **Channel constants** (`CH_SQUAWK` … `CH_DEBUG`) — must match Lua
 3. **Enumerations** — `TxpMode`, `View`, `FltMode`
 4. **Button pin defines** and `Button` struct / `btns[]` array
@@ -100,6 +100,17 @@ Key sections in order:
 11. **`emulateBtnAction()`** — Serial1 debug input handler, calls same dispatchers
 12. **Draw functions** — `drawLeftZone()`, `drawCentreZone()`, `drawRightUTC/FLT/CTU/CDT()`
 13. **`setup()` / `loop()`**
+
+### Splash Screen
+
+On power-on `showSplash()` displays a GTX330-style initialization page for 10 seconds:
+- Row 1: `GARMIN` (small, centred)
+- Row 2: `myGTX330` (large, centred)
+- Separator line
+- Row 3: `SW VER <FW_VERSION>` (medium, centred)
+- Row 4: `FOR X-PLANE 12 / AIR MANAGER 5` (small, centred)
+
+To bump the firmware version, change `#define FW_VERSION` near the top of the sketch.
 
 ### Startup Sync
 

@@ -4,6 +4,24 @@ A hardware Garmin GTX330 transponder emulator for X-Plane 12, driven by an Ardui
 
 ---
 
+## Power-On and Startup
+
+When the Arduino powers up, the initialization page is displayed for 10 seconds:
+
+```
+              GARMIN
+           myGTX330
+        ──────────────────────────────
+           SW VER  1.1
+    FOR X-PLANE 12 / AIR MANAGER 5
+```
+
+After the splash, the main display appears. The centre zone shows a blinking `SYNC` badge until Air Manager responds. Once connected, `RDY` appears briefly, then normal operation begins.
+
+> The unit works fully without X-Plane or Air Manager connected — it retains the last known state and re-syncs automatically when the connection is restored.
+
+---
+
 ## Display Layout
 
 ```
@@ -30,14 +48,17 @@ When the transponder is being interrogated by ATC:
 
 The four squawk digits are always visible in large characters.
 
-**Special badges** (top-left corner):
+**Special badges** (top-left corner, highest priority first):
 
-| Badge | Squawk | Meaning |
-|-------|--------|---------|
-| `VFR` (outlined) | 7000 | VFR flight (EU/ICAO) |
-| `EMER` (flashing) | 7700 | Emergency |
-| `RDOF` (flashing) | 7600 | Radio failure |
-| `HJCK` (flashing) | 7500 | Hijacking |
+| Badge | Condition | Meaning |
+|-------|-----------|---------|
+| `EMER` (flashing) | Squawk 7700 | Emergency |
+| `RDOF` (flashing) | Squawk 7600 | Radio failure |
+| `HJCK` (flashing) | Squawk 7500 | Hijacking |
+| `VFR` (outlined) | Squawk 7000 | VFR flight (EU/ICAO) |
+| `INV` | Digit 8 or 9 pressed | Invalid squawk digit (clears after 1 s) |
+| `RDY` | On Air Manager connect | Sync complete (clears after 1.5 s) |
+| `SYNC` (blinking) | Waiting for Air Manager | Startup handshake in progress |
 
 Emergency codes also flash a double border around the whole centre zone.
 
