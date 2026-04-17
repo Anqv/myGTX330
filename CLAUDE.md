@@ -51,7 +51,7 @@ All Arduino↔Air Manager data flows through SiMessagePort integer channels. Cha
 | 10 | ARD→AM    | New squawk code set by pilot |
 | 11 | ARD→AM    | New mode set by pilot |
 | 12 | ARD→AM    | IDENT button pressed (one-shot, value=1) |
-| 20 | ARD→AM    | Ping — sent every 2 s until AM replies |
+| 20 | ARD→AM    | Ping — sent every 4 s until AM replies |
 | 21 | AM→ARD    | AM ready — Arduino pushes squawk + mode to X-Plane |
 | 99 | ARD→AM    | Debug string (when DEBUG_TO_AM = true) |
 
@@ -103,7 +103,7 @@ Key sections in order:
 
 ### Startup Sync
 
-Arduino sends `CH_REQUEST_UPDATE` (ch 20, ping) every 2 s while `!syncDone`. Air Manager responds with `CH_AM_READY` (ch 21) — both immediately on instrument load and in reply to every ping, so either boot order works.
+Arduino sends `CH_REQUEST_UPDATE` (ch 20, ping) every 4 s while `!syncDone`. Air Manager responds with `CH_AM_READY` (ch 21) — both immediately on instrument load and in reply to every ping, so either boot order works.
 
 When Arduino receives `CH_AM_READY` it pushes its current `squawkCode` and `txpMode` to X-Plane via `CH_SQUAWK_SET` / `CH_MODE_SET`, sets `syncDone`, and shows a brief `RDY` badge. Altitude, ground speed and UTC arrive naturally from X-Plane subscription callbacks as values change.
 
