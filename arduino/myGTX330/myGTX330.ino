@@ -66,6 +66,8 @@
 static const bool DEBUG_TO_AM      = false;
 static const bool DEBUG_TO_SERIAL1 = true;
 
+#define FW_VERSION "1.1"
+
 // =============================================================================
 //  DISPLAY — SW-SPI, full framebuffer (requires U8G2_16BIT)
 // =============================================================================
@@ -1134,12 +1136,35 @@ static void updateDisplay() {
 
 static void showSplash() {
     u8g2.clearBuffer();
-    u8g2.setFont(u8g2_font_10x20_tr);
-    u8g2.drawStr(60, 28, "GTX 330");
-    u8g2.setFont(u8g2_font_7x13B_tr);
-    u8g2.drawStr(52, 50, "INITIALIZING");
+
+    // Row 1 — "GARMIN"  (small, centred)
+    u8g2.setFont(u8g2_font_helvB10_tr);
+    int16_t w = u8g2.getStrWidth("GARMIN");
+    u8g2.drawStr((256 - w) / 2, 11, "GARMIN");
+
+    // Row 2 — "myGTX330"  (large, centred)
+    u8g2.setFont(u8g2_font_helvB18_tr);
+    w = u8g2.getStrWidth("myGTX330");
+    u8g2.drawStr((256 - w) / 2, 35, "myGTX330");
+
+    // Separator
+    u8g2.drawHLine(0, 38, 256);
+
+    // Row 3 — "SW VER  1.1"  (medium, centred)
+    u8g2.setFont(u8g2_font_helvB10_tr);
+    char ver[16];
+    snprintf(ver, sizeof(ver), "SW VER  " FW_VERSION);
+    w = u8g2.getStrWidth(ver);
+    u8g2.drawStr((256 - w) / 2, 52, ver);
+
+    // Row 4 — copyright / platform line  (small, centred)
+    u8g2.setFont(u8g2_font_5x7_tr);
+    const char* copy = "FOR X-PLANE 12 / AIR MANAGER 5";
+    w = u8g2.getStrWidth(copy);
+    u8g2.drawStr((256 - w) / 2, 63, copy);
+
     u8g2.sendBuffer();
-    delay(1500);
+    delay(3000);
 }
 
 // =============================================================================
